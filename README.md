@@ -1,4 +1,4 @@
-# Instalacion de ARCHLINUX UEFI con Secure Boot y BTRFS file system.
+# Instalacion de ARCHLINUX UEFI con Secure Boot y BTRFS file system encriptado.
 
 Aun en prueba...
 
