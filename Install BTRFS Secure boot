@@ -244,19 +244,6 @@ echo "Instalando Sistema base"
 echo ""
 pacstrap /mnt base base-devel nano reflector irqbalance python tlp iwd openssh rsync zstd zsh pcmanfm xarchiver intel-ucode docker libvirt btrfs-progs qemu refind sbsigntools sshguard npm bc bat snapper chrony systemd-swap iptables-nft nftables polkit-gnome gnome-keyring apparmor postgresql cpio
 
-#pacstrap /mnt dbus-broker
-#go kanshi
-#wl-clipboard  ripgrep tokei hyperfine faac  faad2 flac jasper 
-#grim libdca libdv libmad libvorbis  waybar wavpack
-#sway lollypop alacritty wofi  mako slurp xdg-desktop-portal-wlr libxv 
-#libsecret gdm fd arj lha udiskie imv mpv  chezmoi powertop brightnessctl 
-#lastpass-cli 
-#xorg-xwayland  exa   man network-manager-applet unarj 
-#blueman yarn  code   swayidle haveged profile-sync-daemon shfmt 
-#compsize pipewire-pulse pipewire-jack pipewire-alsa wf-recorder 
-#wireplumber skim youtube-dl celluloid entr a52dec 
-#firefox-ublock-origin firefox-decentraleyes firefox-dark-reader 
-#rust-analyzer rustup
 
 sleep 2
 clear
