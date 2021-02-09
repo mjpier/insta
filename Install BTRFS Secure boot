@@ -1,0 +1,1528 @@
+#!/bin/bash
+
+clear
+
+echo "                                                                                             ";
+echo "                                                                                             ";
+echo "      █████╗ ██████╗  ██████╗██╗  ██╗         ██████╗ ████████╗ ██████╗  ███████╗ ███████╗   ";
+echo "     ██╔══██╗██╔══██╗██╔════╝██║  ██║         ██╔══██╗╚══██╔══╝ ██╔══██╗ ██╔════╝ ██╔════╝   ";
+echo "     ███████║██████╔╝██║     ███████║  ████║  ██████╔╝   ██║    ██████╔╝ ██████╗  ███████╗   ";
+echo "     ██╔══██║██╔══██╗██║     ██╔══██║         ██╔══██    ██║    ██╔══██╗ ██╔═══╝  ╚════██║   ";
+echo "     ██║  ██║██║  ██║╚██████╗██║  ██║         ██████╗    ██║    ██║  ██║ ██║      ███████║   ";
+echo "     ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝         ╚═════╝    ╚═╝    ╚═╝  ╚═╝ ╚═╝      ╚══════╝   ";
+echo "                                                                                             ";
+echo "                                                                                             ";
+echo "                  ██╗███╗   ██╗███████╗████████╗ █████╗ ██╗     ██╗                ";
+echo "                  ██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██║                ";
+echo "                  ██║██╔██╗ ██║███████╗   ██║   ███████║██║     ██║                ";
+echo "                  ██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║                ";
+echo "                  ██║██║ ╚████║███████║   ██║   ██║  ██║███████╗███████╗           ";
+echo "                  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝           ";
+
+sleep 4
+clear
+
+#CAMBIAR EL LIVEUB A ESPAÑOL
+
+echo ""
+echo "Cambiando teclado de Live USB en español"
+echo ""
+read -p "Introduce la distribucion de tu teclado, Ejemplo (es / la-latin1): " tecla
+echo ""
+
+loadkeys $tecla
+
+echo ""
+
+sleep 2
+clear
+
+#ACTUALIZACION DE LLAVES Y MIRRORLIST
+
+echo ""
+echo "Actualizando llaves"
+echo ""
+
+pacman -Sy archlinux-keyring --noconfirm 
+
+sleep 1
+clear
+
+pacman -Sy reflector python rsync --noconfirm 
+
+sleep 1
+clear
+
+echo ""
+echo "Actualizando lista de MirrorList"
+echo ""
+
+reflector --verbose --latest 10 --sort rate --save /etc/pacman.d/mirrorlist
+
+sleep 1
+clear
+
+cat /etc/pacman.d/mirrorlist
+
+sleep 1
+clear
+
+#DECLARAR USUARIOS Y CONTRASEÑAS EN MODO CLEAN PARA NO FALLAR
+
+echo ""
+echo "Declarando disco a instalar"
+echo ""
+
+printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' _
+echo "print devices" | parted | grep /dev/ | awk '{if (NR!=1) {print}}'
+echo ''
+echo ''
+read -p "Observa los dispositivos detectados anteriormente e introduce tu disco a instalar Arch, Ejemplo (/dev/sda ; /dev/vda ; /dev/nvme0n1): " disco
+echo ""
+
+sleep 1
+clear
+
+echo ""
+echo "VERIFICA LOS DATOS INGRESADOS"
+echo ""
+echo "Selección de Disco: $disco"
+echo ''
+
+
+sleep 2
+clear
+
+# PARTICIONAR EL DISCO
+
+echo ""
+echo "Particionando el disco"
+echo ""
+
+#uefi=$( ls /sys/firmware/efi/ | grep -ic efivars )
+
+#clear
+
+#echo ""
+#echo "Sistema UEFI detectado"
+#echo ""
+
+#---METODO CON EFI SECURE BOOT - ROOT ECNCRIPTADO - FILE SISTEM BTRFS------
+
+sgdisk --zap-all ${disco}
+parted ${disco} mklabel gpt
+sgdisk ${disco} -n=1:0:+512M -t=1:ef00
+sgdisk ${disco} -n=2:0:0
+fdisk -l ${disco} > /tmp/partition
+
+echo ""
+
+cat /tmp/partition
+
+sleep 2
+
+partition="$(cat /tmp/partition | grep /dev/ | awk '{if (NR!=1) {print}}' | sed 's/*//g' | awk -F ' ' '{print $1}')"
+
+echo $partition | awk -F ' ' '{print $1}' >  boot-efi
+echo $partition | awk -F ' ' '{print $2}' >  root-efi
+
+echo ""
+echo "Partición EFI es:" 
+cat boot-efi
+echo ""
+echo "Partición ROOT es:"
+cat root-efi
+echo ""
+
+sleep 3
+clear
+
+# ENCRIPTANDO PARTICION ROOT
+
+echo ""
+echo "Encriptando Particion ROOT"
+echo ""
+	
+cryptsetup luksFormat --perf-no_read_workqueue --perf-no_write_workqueue --type luks2 --cipher aes-xts-plain64 --key-size 512 --iter-time 2000 --pbkdf argon2id --hash sha3-512 $(cat root-efi)
+
+echo ""
+echo "Abriendo particion Encriptada"
+echo ""
+
+cryptsetup --allow-discards --perf-no_read_workqueue --perf-no_write_workqueue --persistent open $(cat root-efi) crypt
+
+sleep 2
+clear
+
+# FORMATEANDO PARTICIONES
+
+echo ""
+echo "Formateando Particion EFI"
+echo ""
+
+mkfs.vfat -F 32 -n "EFI" $(cat boot-efi) 
+
+echo ""
+echo "Formateando Particion ROOT"
+echo ""
+
+mkfs.btrfs -L Arch -f /dev/mapper/crypt
+
+sleep 2
+clear
+
+# CREANDO SUBVOLUMENES
+
+echo ""
+echo "Crear Subvolumenes"
+echo ""
+
+mount /dev/mapper/crypt /mnt
+btrfs sub create /mnt/@
+btrfs sub create /mnt/@home
+btrfs sub create /mnt/@abs
+btrfs sub create /mnt/@tmp
+btrfs sub create /mnt/@srv
+btrfs sub create /mnt/@snapshots
+btrfs sub create /mnt/@btrfs
+btrfs sub create /mnt/@log
+btrfs sub create /mnt/@cache
+umount /mnt
+
+sleep 2
+clear
+
+# MONTAR SUBVOLUMENES
+
+echo ""
+echo "Montar Subvolumenes"
+echo ""
+
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@ /dev/mapper/crypt /mnt
+mkdir -p /mnt/{boot,home,var/cache,var/log,.snapshots,btrfs,var/tmp,var/abs,srv}
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@home /dev/mapper/crypt /mnt/home
+mount -o nodev,nosuid,noexec,noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@abs /dev/mapper/crypt /mnt/var/abs
+mount -o nodev,nosuid,noexec,noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@tmp /dev/mapper/crypt /mnt/var/tmp
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@srv /dev/mapper/crypt /mnt/srv
+mount -o nodev,nosuid,noexec,noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@log /dev/mapper/crypt /mnt/var/log
+mount -o nodev,nosuid,noexec,noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@cache /dev/mapper/crypt /mnt/var/cache
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvol=@snapshots /dev/mapper/crypt /mnt/.snapshots
+mount -o noatime,compress-force=zstd,commit=120,space_cache=v2,ssd,discard=async,autodefrag,subvolid=5 /dev/mapper/crypt /mnt/btrfs
+
+
+mkdir -p /mnt/var/lib/{docker,machines,mysql,postgres}
+chattr +C /mnt/var/lib/{docker,machines,mysql,postgres}
+
+
+sleep 2
+clear
+
+# MONTAR PARTICION EFI
+
+echo ""
+echo "Montar Particion EFI"
+echo ""
+
+mount -o nodev,nosuid,noexec $(cat boot-efi) /mnt/boot
+
+sleep 1
+clear
+	
+echo ""
+echo "Revise en punto de montaje en MOUNTPOINT"
+echo ""
+lsblk -l
+
+sleep 3
+clear
+
+
+# INSTALAR SISTEMA BASE
+
+echo ""
+echo "Instalando Sistema base"
+echo ""
+pacstrap /mnt base base-devel nano reflector irqbalance python tlp iwd openssh rsync zstd zsh pcmanfm xarchiver intel-ucode docker libvirt btrfs-progs qemu refind sbsigntools sshguard npm bc bat snapper chrony systemd-swap iptables-nft nftables polkit-gnome gnome-keyring apparmor postgresql cpio
+
+#pacstrap /mnt dbus-broker
+#go kanshi
+#wl-clipboard  ripgrep tokei hyperfine faac  faad2 flac jasper 
+#grim libdca libdv libmad libvorbis  waybar wavpack
+#sway lollypop alacritty wofi  mako slurp xdg-desktop-portal-wlr libxv 
+#libsecret gdm fd arj lha udiskie imv mpv  chezmoi powertop brightnessctl 
+#lastpass-cli 
+#xorg-xwayland  exa   man network-manager-applet unarj 
+#blueman yarn  code   swayidle haveged profile-sync-daemon shfmt 
+#compsize pipewire-pulse pipewire-jack pipewire-alsa wf-recorder 
+#wireplumber skim youtube-dl celluloid entr a52dec 
+#firefox-ublock-origin firefox-decentraleyes firefox-dark-reader 
+#rust-analyzer rustup
+
+sleep 2
+clear
+
+
+# CONFIGURAR FSTAB
+
+echo ""
+echo "Configurar archivo FSTAB"
+echo ""
+echo "genfstab -U -p /mnt >> /mnt/etc/fstab"
+echo ""
+
+genfstab -U /mnt >> /mnt/etc/fstab
+cat /mnt/etc/fstab
+
+sleep 1
+clear
+
+
+# ACTUALIZAR HORA
+
+echo ""
+echo "Actualizando Hora"
+echo ""
+
+timedatectl set-ntp true
+
+sleep 1
+clear
+
+# COPIANDO CONFIGURACIONES DE ZSH PARA UNA MEJOR EXPERIENCIA
+
+echo ""
+echo "Copiando configuraciones de ZSH"
+echo ""
+
+cp /etc/zsh/zprofile /mnt/root/.zprofile
+cp /etc/zsh/zshrc /mnt/root/.zshrc
+
+sleep 1
+clear
+
+# ACTUALZAR MIRRORS
+
+echo ""
+echo "Actualizando lista de MirrorList"
+echo ""
+
+arch-chroot /mnt /bin/bash -c "reflector --verbose --latest 10 --sort rate --save /etc/pacman.d/mirrorlist"
+
+sleep 1
+clear
+
+echo ""
+echo "Revise Mirrorlist"
+echo ""
+
+cat /mnt/etc/pacman.d/mirrorlist
+
+sleep 3
+clear
+
+
+# Add pacman mirrorlist
+# cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
+
+# CHROOT EN EL NUEVO SISTEMA
+# arch-chroot /mnt /bin/zsh
+
+
+
+#CONFIGURANDO PACMAN
+
+echo ""
+echo "Configurando Tweaks a pacman.conf"
+echo ""
+
+#sed -i 's/#UseSyslog/UseSyslog/' /mnt/etc/pacman.conf
+sed -i 's/#Color/Color/g' /mnt/etc/pacman.conf
+sed -i 's/#TotalDownload/TotalDownload/g' /mnt/etc/pacman.conf
+sed -i 's/#VerbosePkgLists/VerbosePkgLists/g' /mnt/etc/pacman.conf
+#sed -i 's/#CheckSpace/CheckSpace/' /mnt/etc/pacman.conf
+
+sed -i "37i ILoveCandy" /mnt/etc/pacman.conf
+
+sed -i '93d' /mnt/etc/pacman.conf
+sed -i '94d' /mnt/etc/pacman.conf
+sed -i "93i [multilib]" /mnt/etc/pacman.conf
+sed -i "94i Include = /etc/pacman.d/mirrorlist" /mnt/etc/pacman.conf
+
+sleep 2
+clear
+
+
+#HOST
+
+echo ""
+echo "Estableciendo nombre del computador"
+echo ""
+read -p "Introduce NOMBRE DEL EQUIPO (host): " hostname
+echo ""
+
+#NOMBRE DEL COMPUTADOR
+echo "$hostname" > /mnt/etc/hostname
+
+echo ""
+echo "Estableciendo host"
+echo ""
+
+echo "# <ip-address> <hostname.domain.org> <hostname>" >> /mnt/etc/hosts
+echo "127.0.0.1 localhost" >> /mnt/etc/hosts
+echo "::1 localhost" >> /mnt/etc/hosts
+echo "127.0.1.1 $hostname.localdomain $hostname" >> /mnt/etc/hosts
+
+sleep 1
+clear
+
+echo "Hostname: $(cat /mnt/etc/hostname)"
+echo ""
+echo "Hosts: $(cat /mnt/etc/hosts)"
+echo ""
+
+sleep 2
+clear
+
+
+#USUARIO Y ADMIN
+
+echo ""
+echo "Estableciendo Usuario y Administrador"
+echo ""
+
+read -p "Introduce la clave ROOT: " rootpasswd
+echo ""
+read -p "Introduce Nombre de USUARIO Nuevo: " user
+echo ""
+read -p "Introduce la CLAVE de $user: " userpasswd
+echo ""
+
+arch-chroot /mnt /bin/bash -c "(echo $rootpasswd ; echo $rootpasswd) | passwd root"
+arch-chroot /mnt /bin/bash -c "useradd -m -g users -G docker,input,kvm,libvirt,storage,video,wheel -s /bin/zsh $user"
+
+arch-chroot /mnt /bin/bash -c "(echo $userpasswd ; echo $userpasswd) | passwd $user"
+
+sed -i "82c %wheel ALL=(ALL) NOPASSWD: ALL"  /mnt/etc/sudoers
+
+sleep 1
+clear
+
+
+#VERIFICARLOOOOOOOOO#######
+#######################3###
+#Si agregas el valor «0», se desactiva el temporizador 
+#y siempre solicitara la contraseña.
+
+#Defaults        timestamp_timeout=20 (20 minutos en sudo sin pedir contrasena)
+
+echo ""
+echo "Estableciendo Defaults Timestamp a 0"
+echo ""
+
+echo "Defaults timestamp_timeout=0" >> /mnt/etc/sudoers
+
+sleep 1
+clear
+
+################################
+################################
+################################
+
+
+#ACTUALIZACIÓN DE IDIOMA Y ZONA HORARIA
+echo "" 
+echo -e ""
+echo -e "\t\t\t| Actualizando Idioma del Sistema |"
+printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' _
+echo -e ""
+
+echo ""
+read -p "Introduce tu ubicación, Ejemplo (es_PE.UTF-8 / es_MX.UTF-8 / es_AR.UTF-8): " userpais
+echo ""
+
+echo "$userpais UTF-8" > /mnt/etc/locale.gen
+arch-chroot /mnt /bin/bash -c "locale-gen" 
+echo "LANG=$userpais" > /mnt/etc/locale.conf
+echo ""
+cat /mnt/etc/locale.conf 
+cat /mnt/etc/locale.gen
+sleep 3
+
+echo ""
+arch-chroot /mnt /bin/bash -c "export $(cat /mnt/etc/locale.conf)" 
+export $(cat /mnt/etc/locale.conf)
+arch-chroot /mnt /bin/bash -c "sudo -u $user export $(cat /etc/locale.conf)"
+export $(cat /mnt/etc/locale.conf)
+
+sleep 2
+clear
+
+arch-chroot /mnt /bin/bash -c "pacman -Sy curl --noconfirm"
+arch-chroot /mnt /bin/bash -c "ln -sf /usr/share/zoneinfo/$(curl https://ipapi.co/timezone) /etc/localtime"
+
+#OPCIONAL
+
+#arch-chroot /mnt /bin/bash -c "timedatectl set-timezone $(curl https://ipapi.co/timezone)"
+#arch-chroot /mnt /bin/bash -c "pacman -S ntp --noconfirm"
+#clear
+#arch-chroot /mnt /bin/bash -c "ntpd -qg"
+#arch-chroot /mnt /bin/bash -c "hwclock --systohc"
+#sleep 2
+
+clear
+
+#INSTALACION DEL KERNEL
+
+echo ""
+echo "Instalando kernel"
+echo ""
+# arch-chroot /mnt /bin/bash -c "pacman -S linux-lts linux-firmware linux-lts-headers mkinitcpio --noconfirm"
+arch-chroot /mnt /bin/bash -c "pacman -S linux linux-firmware linux-headers mkinitcpio --noconfirm"
+
+sleep 2
+clear
+
+#arch-chroot /mnt /bin/bash -c "pacman -S gnome-shell gdm gnome-control-center gnome-backgrounds gnome-tweaks --noconfirm"
+#arch-chroot /mnt /bin/bash -c "systemctl enable gdm"
+
+
+###################################
+##################################
+##################################
+
+echo ""
+echo "Instalando WIFI"
+echo ""
+
+#INSTALACION DE WIFI
+arch-chroot /mnt /bin/bash -c "pacman -S dhcpcd networkmanager net-tools ifplugd --noconfirm"
+
+sleep 1
+clear
+
+echo ""
+echo "Instalando Drivers WIFI"
+echo ""
+
+#INSTALACION DE DRIVERS WIFI
+arch-chroot /mnt /bin/bash -c "pacman -S wireless_tools wpa_supplicant wireless-regdb --noconfirm"
+
+sleep 1
+clear
+
+echo ""
+echo "Instalando Bluetooth"
+echo ""
+
+#INSTALACION DE DRIVERS BLUETOOTH
+
+arch-chroot /mnt /bin/bash -c "pacman -S bluez bluez-utils pulseaudio-bluetooth --noconfirm"
+
+sleep 1
+clear
+
+echo ""
+echo "Activando Servicios Networkmanager y Bluetooth"
+echo ""
+#ACTIVAR SERVICIOS
+#arch-chroot /mnt /bin/bash -c "systemctl enable dhcpcd NetworkManager ntpd"
+arch-chroot /mnt /bin/bash -c "systemctl enable dhcpcd"
+arch-chroot /mnt /bin/bash -c "systemctl enable NetworkManager"
+arch-chroot /mnt /bin/bash -c "systemctl enable bluetooth.service"
+
+echo "noipv6rs" >> /mnt/etc/dhcpcd.conf
+echo "noipv6" >> /mnt/etc/dhcpcd.conf
+
+sleep 1
+clear
+
+
+#SHELL
+
+echo ""
+echo "Instalando Tweaks ZSH"
+echo ""
+arch-chroot /mnt /bin/bash -c "pacman -S zsh-autosuggestions zsh-history-substring-search zsh-completions zsh-syntax-highlighting --noconfirm"
+
+sleep 1
+clear
+
+#INSTALACION DE SERVIDOR X
+
+echo ""
+echo "Instalando Servidor X"
+echo ""
+arch-chroot /mnt /bin/bash -c "pacman -S xorg-server xorg-apps xorg-xinit --noconfirm"
+
+sleep 1
+clear
+
+#UTILIDADES
+
+echo ""
+echo "Instalando Utilidades"
+echo ""
+arch-chroot /mnt /bin/bash -c "pacman -S p7zip unrar zip unzip gzip bzip2 lzop git wget neofetch lsb-release xdg-user-dirs android-file-transfer android-tools android-udev libmtp libcddb gvfs gvfs-afc gvfs-smb gvfs-gphoto2 gvfs-mtp gvfs-goa gvfs-nfs dosfstools jfsutils f2fs-tools btrfs-progs exfat-utils ntfs-3g reiserfsprogs xfsprogs nilfs-utils polkit gpart mtools ffmpeg aom libde265 x265 x264 libmpeg2 xvidcore libtheora libvpx schroedinger sdl gstreamer gst-plugins-bad gst-plugins-base gst-plugins-base-libs gst-plugins-good gst-plugins-ugly xine-lib lame --noconfirm"
+# gst-libav gstreamer-vaapi lrzip pigz pbzip2 lzip
+arch-chroot /mnt /bin/bash -c "xdg-user-dirs-update"
+clear
+echo ""
+arch-chroot /mnt /bin/bash -c "ls -l /home/$user"
+sleep 2
+clear
+
+
+#AUDIO
+
+echo ""
+echo "Instalando Audio Drivers"
+echo ""
+
+arch-chroot /mnt /bin/bash -c "pacman -S pulseaudio pulseaudio-alsa pavucontrol alsa-plugins alsa-utils --noconfirm"
+
+sleep 1
+clear
+
+#FONTS (TIPOGRAFIAS)
+
+echo ""
+echo "Instalando Fuentes"
+echo ""
+arch-chroot /mnt /bin/bash -c "pacman -S ttf-dejavu ttf-liberation xorg-fonts-type1 ttf-bitstream-vera gnu-free-fonts --noconfirm"
+
+# ttf-fira-mono ttf-opensans ttf-hack noto-fonts noto-fonts-emoji ttf-font-awesome ttf-droid adobe-source-code-pro-fonts ttf-roboto ttf-roboto-mono ttf-fira-code ttf-hanazono 
+
+
+sleep 1
+clear
+
+#NAVEGADOR WEB
+#arch-chroot /mnt /bin/bash -c "pacman -S chromium --noconfirm"
+#chromium
+#opera
+#vivaldi
+
+
+
+
+############################################
+############################################
+############################################
+############################################
+
+#ESTABLECER FORMATO DE TECLADO
+
+echo ""
+read -p "Introduce la distribucion de tu teclado, Ejemplo (es / latam / us): " teclado
+echo ""
+
+        
+case $teclado in
+ 
+	latam) teclado_tty="la-latin1"
+	;;  
+  
+	*) teclado_tty=$teclado
+	;;
+	
+esac
+ 
+echo "KEYMAP=$teclado_tty" > /mnt/etc/vconsole.conf
+cat /mnt/etc/vconsole.conf 
+clear
+ 
+      arch-chroot /mnt /bin/bash -c "localectl --no-convert set-x11-keymap "$teclado"" 
+      
+      echo -e 'Section "InputClass"' > /mnt/etc/X11/xorg.conf.d/00-keyboard.conf
+      echo -e 'Identifier "system-keyboard"' >> /mnt/etc/X11/xorg.conf.d/00-keyboard.conf
+      echo -e 'MatchIsKeyboard "on"' >> /mnt/etc/X11/xorg.conf.d/00-keyboard.conf
+      echo -e 'Option "XkbLayout" "'$teclado'"' >> /mnt/etc/X11/xorg.conf.d/00-keyboard.conf
+      echo -e 'EndSection' >> /mnt/etc/X11/xorg.conf.d/00-keyboard.conf           
+      echo ""
+      cat /mnt/etc/X11/xorg.conf.d/00-keyboard.conf
+      sleep 2
+      clear
+
+####################################################
+####################################################
+####################################################
+####################################################
+
+# INSTALAR AUR HELPER --- YAY ---
+
+echo ""
+echo "Instalando AUR Helper YAY"
+echo ""
+
+echo "cd && git clone https://aur.archlinux.org/yay-bin.git && cd yay-bin && makepkg -si --noconfirm && cd && rm -rf yay-bin" | arch-chroot /mnt /bin/bash -c "su $user"
+sed -i "82c %wheel ALL=(ALL) ALL"  /mnt/etc/sudoers
+
+sleep 1
+clear
+
+
+
+#INSTALACION DE DRIVERS DE VIDEO
+
+echo ""
+echo "Instalando Video Drivers"
+echo ""
+
+case $(systemd-detect-virt) in
+        oracle)
+            grafica="virtualbox-guest-utils xf86-video-vmware virtualbox-host-modules-arch mesa"
+        ;;
+        vmware)
+            grafica="xf86-video-vmware xf86-input-vmmouse open-vm-tools net-tools gtkmm mesa"
+        ;;
+        qemu)
+            grafica="spice-vdagent xf86-video-fbdev mesa mesa-libgl qemu-guest-agent"
+        ;;
+        kvm)
+            grafica="spice-vdagent xf86-video-fbdev mesa mesa-libgl qemu-guest-agent"
+        ;;
+        microsoft)
+            grafica="xf86-video-fbdev mesa-libgl"
+        ;;
+        xen)
+            grafica="xf86-video-fbdev mesa-libgl"
+        ;;
+        *)
+            if (lspci | grep VGA | grep "NVIDIA\|nVidia" &>/dev/null); then
+                grafica="xf86-video-nouveau mesa lib32-mesa mesa-vdpau libva-mesa-driver"
+                
+            elif (lspci | grep VGA | grep "Radeon R\|R2/R3/R4/R5" &>/dev/null); then
+                grafica="xf86-video-amdgpu mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon mesa-vdpau libva-mesa-driver lib32-mesa-vdpau lib32-libva-mesa-driver libva-vdpau-driver libvdpau-va-gl libva-utils vdpauinfo opencl-mesa clinfo ocl-icd lib32-ocl-icd opencl-headers"
+
+            elif (lspci | grep VGA | grep "ATI\|AMD/ATI" &>/dev/null); then
+                grafica="xf86-video-ati mesa lib32-mesa mesa-vdpau libva-mesa-driver lib32-mesa-vdpau lib32-libva-mesa-driver libva-vdpau-driver libvdpau-va-gl libva-utils vdpauinfo opencl-mesa clinfo ocl-icd lib32-ocl-icd opencl-headers"
+
+             elif (lspci | grep VGA | grep "Intel" &>/dev/null); then
+                grafica="xf86-video-intel vulkan-intel mesa lib32-mesa intel-media-driver libva-intel-driver libva-vdpau-driver libvdpau-va-gl libva-utils vdpauinfo intel-compute-runtime clinfo ocl-icd lib32-ocl-icd opencl-headers"
+                
+             else
+                grafica="xf86-video-vesa"
+            
+        fi
+        ;;
+    esac
+
+arch-chroot /mnt /bin/bash -c "pacman -S $grafica --noconfirm --needed"
+
+sleep 1
+clear
+
+
+# INSTALAR UTILIDADES DESDE YAY
+
+# Add some user niceties whiler you are there
+
+echo ""
+echo "Instalando Utilidades desde AUR"
+echo ""
+arch-chroot /mnt /bin/bash -c "rustup default stable"
+arch-chroot /mnt /bin/bash -c "yay --noremovemake --nodiffmenu --batchinstall -S otf-san-francisco otf-san-francisco gst-plugin-libde265 zoxide-bin ananicy-git neovim-nightly-git lazygit-bin grimshot memavaild prelockd nohang-git auto-cpufreq-git otf-nerd-fonts-monacob-mono refind-btrfs bat-extras-git opennic-up neovim-remote git-delta-bin git-journal just gitui-bin procs-bin"
+
+
+#arch-chroot /mnt /bin/bash -c "yay --noremovemake --nodiffmenu --batchinstall -S otf-san-francisco fedora-firefox-wayland-bin otf-san-francisco pamac-aur starship-bin firefox-extension-amazon-container gst-plugin-libde265 firefox-extension-privacybadger poweralertd zoxide-bin firefox-extension-https-everywhere firefox-extension-facebook-container wob firefox-extension-containerise ananicy-git lastpass nwg-launchers persway neovim-nightly-git swaylock-effects-git lazygit-bin grimshot memavaild prelockd nohang-git auto-cpufreq-git otf-nerd-fonts-monacob-mono refind-btrfs bat-extras-git opennic-up ttf-wps-office-fonts wps-office wps-office-mime neovim-remote git-delta-bin  git-journal just gitui-bin procs-bin"
+
+
+# INSTALAR DISPLAY LY MANAGER
+echo ""
+echo "Instalando Ly Display manager"
+echo ""
+
+arch-chroot /mnt /bin/bash -c "yay --noremovemake --nodiffmenu --batchinstall -S ly-git"
+arch-chroot /mnt /bin/bash -c "systemctl enable ly.service"
+arch-chroot /mnt /bin/bash -c "systemctl disable getty@tty2.service"
+
+sleep 1
+clear
+
+
+# INSTALANDO KERNEL ADICIONAL - BAJA LATENCIA
+
+echo ""
+echo "Instalando Kernel de Baja Latencia"
+echo ""
+arch-chroot /mnt /bin/bash -c "yay --noremovemake --nodiffmenu --editmenu -S linux-xanmod-cacule linux-xanmod-cacule-headers"
+
+arch-chroot /mnt /bin/bash -c "export PATH=/usr/bin/ && yay -S nerd-fonts-jetbrains-mono"
+
+sleep 1
+clear
+
+
+# Sign bootloader & kernel for Secure Boot
+
+echo ""
+echo "Firmando Kernel y Bootloader SECURE BOOT"
+echo ""
+
+arch-chroot /mnt /bin/bash -c "yay --noremovemake --nodiffmenu -S shim-signed"
+arch-chroot /mnt /bin/bash -c "refind-install --shim /usr/share/shim-signed/shimx64.efi --localkeys"
+arch-chroot /mnt /bin/bash -c "sbsign --key /etc/refind.d/keys/refind_local.key --cert /etc/refind.d/keys/refind_local.crt --output /boot/vmlinuz-linux /boot/vmlinuz-linux"
+
+sleep 1
+clear
+
+
+# Add rEFInd theme
+
+echo ""
+echo "Anadiendo tema a Refind"
+echo ""
+arch-chroot /mnt /bin/bash -c "mkdir /boot/EFI/refind/themes"
+arch-chroot /mnt /bin/bash -c "git clone https://github.com/dheishman/refind-dreary.git /boot/EFI/refind/themes/refind-dreary-git"
+arch-chroot /mnt /bin/bash -c "mv /boot/EFI/refind/themes/refind-dreary-git/highres /boot/EFI/refind/themes/refind-dreary"
+arch-chroot /mnt /bin/bash -c "rm -dR /boot/EFI/refind/themes/refind-dreary-git"
+
+sleep 1
+clear
+
+# Configure rEFInd
+echo ""
+echo "Configurando Refind"
+echo ""
+sed -i 's/#resolution 3/resolution 1920 1080/' /mnt/boot/EFI/refind/refind.conf
+sed -i 's/#use_graphics_for osx,linux/use_graphics_for linux/' /mnt/boot/EFI/refind/refind.conf
+sed -i 's/#scanfor internal,external,optical,manual/scanfor manual,external/' /mnt/boot/EFI/refind/refind.conf
+sed -i 's/^hideui.*/hideui singleuser,hints,arrows,badges/' /mnt/boot/EFI/refind/themes/refind-dreary/theme.conf
+
+sleep 1
+clear
+
+# Add rEFInd Manual Stanza
+
+echo ""
+echo "Anadiendo entrada a Refind.conf"
+echo ""
+
+cat << EOF >> /mnt/boot/EFI/refind/refind.conf
+menuentry "Arch Linux" {
+    icon     /EFI/refind/themes/refind-dreary/icons/os_arch.png
+    volume   "Arch Linux"
+    loader   /vmlinuz-linux
+    initrd   /initramfs-linux.img
+    options  "rd.luks.name=$(blkid $(cat root-efi) | cut -d " " -f2 | cut -d '=' -f2 | sed 's/\"//g')=crypt root=/dev/mapper/crypt rootflags=subvol=@ rw quiet nmi_watchdog=0 kernel.unprivileged_userns_clone=0 net.core.bpf_jit_harden=2 apparmor=1 lsm=lockdown,yama,apparmor systemd.unified_cgroup_hierarchy=1 add_efi_memmap initrd=\intel-ucode.img"
+    submenuentry "Boot - terminal" {
+        add_options "systemd.unit=multi-user.target"
+    }
+}
+
+menuentry "Arch Linux - Low Latency" {
+    icon     /EFI/refind/themes/refind-dreary/icons/os_arch.png
+    volume   "Arch Linux"
+    loader   /vmlinuz-linux-xanmod-cacule
+    initrd   /initramfs-linux-xanmod-cacule.img
+    options  "rd.luks.name=$(blkid $(cat root-efi) | cut -d " " -f2 | cut -d '=' -f2 | sed 's/\"//g')=crypt root=/dev/mapper/crypt rootflags=subvol=@ rw quiet nmi_watchdog=0 kernel.unprivileged_userns_clone=0 net.core.bpf_jit_harden=2 apparmor=1 lsm=lockdown,yama,apparmor systemd.unified_cgroup_hierarchy=1 add_efi_memmap initrd=\intel-ucode.img"
+    submenuentry "Boot - terminal" {
+        add_options "systemd.unit=multi-user.target"
+    }
+}
+
+include themes/refind-dreary/theme.conf
+EOF
+
+
+### options  "rd.luks.name=$(blkid /dev/sda2 | cut -d " " -f2 | cut -d '=' -f2 | sed 's/\"//g')=crypt root=/dev/mapper/crypt rootflags=subvol=@ rw quiet nmi_watchdog=0 kernel.unprivileged_userns_clone=0 net.core.bpf_jit_harden=2 apparmor=1 lsm=lockdown,yama,apparmor systemd.unified_cgroup_hierarchy=1 add_efi_memmap initrd=\intel-ucode.img"
+ 
+
+
+###############################
+###############################
+sleep 1
+clear
+
+# Edit refing-btrfs
+echo ""
+echo "Editando Refind-BTRFS"
+echo ""
+sed -i 's/^count.*/count = "inf"/' /mnt/etc/refind-btrfs.conf
+sed -i 's/^include_sub_menus.*/include_sub_menus = true/' /mnt/etc/refind-btrfs.conf
+
+sleep 1
+clear
+
+# Add snap-pac for automatic pre/post backups for package install/uninstalls/updates
+
+echo ""
+echo "Anadiendo SNAP-PAC"
+echo ""
+arch-chroot /mnt /bin/bash -c "pacman --noconfirm -S snap-pac"
+
+sleep 1
+clear
+
+
+
+##########################################
+############   OTROS SCRIPTS      ##############################
+###########################################
+
+
+
+echo ""
+echo "Anadiendo lo que necesitamos a mkinitcpio.conf"
+echo ""
+
+sed -i 's/BINARIES=()/BINARIES=("\/usr\/bin\/btrfs")/' /mnt/etc/mkinitcpio.conf
+sed -i 's/#COMPRESSION="lz4"/COMPRESSION="lz4"/' /mnt/etc/mkinitcpio.conf
+sed -i 's/#COMPRESSION_OPTIONS=()/COMPRESSION_OPTIONS=(-9)/' /mnt/etc/mkinitcpio.conf
+sed -i 's/^HOOKS.*/HOOKS=(base systemd autodetect modconf block sd-encrypt filesystems keyboard fsck)/' /mnt/etc/mkinitcpio.conf
+
+mkinitcpio -p linux
+
+
+sleep 1
+clear
+
+
+
+
+echo ""
+echo "Configurar el backend iwd de Network Manager"
+echo ""
+
+cat << EOF >> /mnt/etc/NetworkManager/conf.d/nm.conf
+[device]
+wifi.backend=iwd
+EOF
+
+
+sleep 1
+clear
+
+
+echo ""
+echo "Evitando la ralentización de los snapshot"
+echo ""
+
+echo 'PRUNENAMES = ".snapshots"' >> /mnt/etc/updatedb.conf
+
+sleep 1
+clear
+
+
+echo ""
+echo "Configurar reflector"
+echo ""
+
+cat << EOF > /mnt/etc/xdg/reflector/reflector.conf
+# Set the output path where the mirrorlist will be saved (--save).
+--save /etc/pacman.d/mirrorlist
+# Select the transfer protocol (--protocol).
+--protocol https
+# Use only the  most recently synchronized mirrors (--latest).
+--latest 100
+# Sort the mirrors by MirrorStatus score
+--sort score
+EOF
+
+sleep 1
+clear
+
+
+echo ""
+echo "Firmar el kernel automaticamente"
+echo ""
+
+mkdir /mnt/etc/pacman.d/hooks
+
+cat << EOF > /mnt/etc/pacman.d/hooks/999-sign_kernel_for_secureboot.hook
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux
+Target = linux-lts
+Target = linux-hardened
+Target = linux-zen
+Target = linux-xanmod
+Target = linux-xanmod-cacule
+Target = linux-xanmod-git
+Target = linux-xanmod-lts
+Target = linux-xanmod-rt
+Target = linux-xanmod-anbox
+
+[Action]
+Description = Signing kernel with Machine Owner Key for Secure Boot
+When = PostTransaction
+Exec = /usr/bin/fd vmlinuz /boot -d 1 -x /usr/bin/sbsign --key /etc/refind.d/keys/refind_local.key --cert /etc/refind.d/keys/refind_local.crt --output {} {}
+Depends = sbsigntools
+Depends = fd
+EOF
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Actualizar rEFInd ESP en una actualizacion"
+echo ""
+
+cat << EOF > /mnt/etc/pacman.d/hooks/refind.hook
+[Trigger]
+Operation=Upgrade
+Type=Package
+Target=refind
+
+[Action]
+Description = Updating rEFInd on ESP
+When=PostTransaction
+Exec=/usr/bin/refind-install --shim /usr/share/shim-signed/shimx64.efi --localkeys
+EOF
+
+sleep 1
+clear
+
+
+echo ""
+echo "Zsh hook"
+echo ""
+
+cat << EOF > /mnt/etc/pacman.d/hooks/zsh.hook
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Path
+Target = usr/bin/*
+[Action]
+Depends = zsh
+When = PostTransaction
+Exec = /usr/bin/install -Dm644 /dev/null /var/cache/zsh/pacman
+EOF
+
+sleep 1
+clear
+
+echo ""
+echo "Reflector hook"
+echo ""
+
+cat << EOF > /mnt/etc/pacman.d/hooks/mirrorupgrade.hook
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = pacman-mirrorlist
+
+[Action]
+Description = Updating pacman-mirrorlist with reflector and removing pacnew...
+When = PostTransaction
+Depends = reflector
+Exec = /bin/sh -c 'systemctl start reflector.service; if [ -f /etc/pacman.d/mirrorlist.pacnew ]; then rm /etc/pacman.d/mirrorlist.pacnew; fi'
+EOF
+
+sleep 1
+clear
+
+
+echo ""
+echo "Mejor programador de IO"
+echo ""
+
+
+cat << EOF > /mnt/etc/udev/rules.d/60-ioschedulers.rules
+# set scheduler for SSD and eMMC
+ACTION=="add|change", KERNEL=="sd[a-z]|mmcblk[0-9]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
+EOF
+
+sleep 1
+clear
+
+echo ""
+echo "Crear ZRAM"
+echo ""
+
+cat << EOF > /mnt/etc/systemd/swap.conf
+#  This file is part of systemd-swap.
+#
+# Entries in this file show the systemd-swap defaults as
+# specified in /usr/share/systemd-swap/swap-default.conf
+# You can change settings by editing this file.
+# Defaults can be restored by simply deleting this file.
+#
+# See swap.conf(5) and /usr/share/systemd-swap/swap-default.conf for details.
+zram_enabled=1
+zswap_enabled=0
+swapfc_enabled=0
+zram_size=\$(( RAM_SIZE / 4 ))
+EOF
+
+sleep 1
+clear
+
+echo ""
+echo "Chrony"
+echo ""
+
+cat <<EOF > /mnt/etc/chrony.conf
+# Use public NTP servers from the pool.ntp.org project.
+server 0.pool.ntp.org offline
+server 1.pool.ntp.org offline
+server 2.pool.ntp.org offline
+server 3.pool.ntp.org offline
+
+# Record the rate at which the system clock gains/losses time.
+driftfile /etc/chrony.drift
+
+# In first three updates step the system clock instead of slew
+# if the adjustment is larger than 1 second.
+makestep 1.0 3
+
+# Enable kernel synchronization of the real-time clock (RTC).
+rtcsync
+
+rtconutc
+EOF
+
+sleep 1
+clear
+
+echo ""
+echo "Chrony trabajando con Network Manager"
+echo ""
+
+cat << EOF > /mnt/etc/NetworkManager/dispatcher.d/10-chrony
+#!/bin/sh
+
+INTERFACE=\$1
+STATUS=\$2
+
+# Make sure we're always getting the standard response strings
+LANG='C'
+
+CHRONY=\$(which chronyc)
+
+chrony_cmd() {
+    echo "Chrony going \$1."
+    exec \$CHRONY -a \$1
+}
+
+nm_connected() {
+    [ "\$(nmcli -t --fields STATE g)" = 'connected' ]
+}
+
+case "\$STATUS" in
+    up)
+        chrony_cmd online
+    ;;
+    vpn-up)
+        chrony_cmd online
+    ;;
+    down)
+        # Check for active interface, take offline if none is active
+        nm_connected || chrony_cmd offline
+    ;;
+    vpn-down)
+        # Check for active interface, take offline if none is active
+        nm_connected || chrony_cmd offline
+    ;;
+EOF
+
+chmod +x /mnt/etc/NetworkManager/dispatcher.d/10-chrony
+
+
+sleep 1
+clear
+
+
+echo ""
+echo "Docker usando IPV6 & Btrfs"
+echo ""
+
+mkdir /mnt/etc/docker
+
+cat << EOF > /mnt/etc/docker/daemon.json
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "fd00::/80",
+  "storage-driver": "btrfs"
+}
+EOF
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Seguridad y rendimiento"
+echo ""
+
+sed -i 's/^umask.*/umask\ 077/' /mnt/etc/profile
+chmod 700 /mnt/etc/{iptables,arptables,nftables.conf}
+echo "auth optional pam_faildelay.so delay=4000000" >> /mnt/etc/pam.d/system-login
+echo "tcp_bbr" > /mnt/etc/modules-load.d/bbr.conf
+echo "write-cache" > /mnt/etc/apparmor/parser.conf
+
+cat << EOF > /mnt/etc/sysctl.d/99-sysctl-performance-tweaks.conf
+# The swappiness sysctl parameter represents the kernel's preference (or avoidance) of swap space. Swappiness can have a value between 0 and 100, the default value is 60. 
+# A low value causes the kernel to avoid swapping, a higher value causes the kernel to try to use swap space. Using a low value on sufficient memory is known to improve responsiveness on many systems.
+vm.swappiness=10
+
+# The value controls the tendency of the kernel to reclaim the memory which is used for caching of directory and inode objects (VFS cache). 
+# Lowering it from the default value of 100 makes the kernel less inclined to reclaim VFS cache (do not set it to 0, this may produce out-of-memory conditions)
+vm.vfs_cache_pressure=50
+
+# This action will speed up your boot and shutdown, because one less module is loaded. Additionally disabling watchdog timers increases performance and lowers power consumption
+# Disable NMI watchdog
+#kernel.nmi_watchdog = 0
+
+# Contains, as a percentage of total available memory that contains free pages and reclaimable
+# pages, the number of pages at which a process which is generating disk writes will itself start
+# writing out dirty data (Default is 20).
+vm.dirty_ratio = 5
+
+# Contains, as a percentage of total available memory that contains free pages and reclaimable
+# pages, the number of pages at which the background kernel flusher threads will start writing out
+# dirty data (Default is 10).
+vm.dirty_background_ratio = 5
+
+# This tunable is used to define when dirty data is old enough to be eligible for writeout by the
+# kernel flusher threads.  It is expressed in 100'ths of a second.  Data which has been dirty
+# in-memory for longer than this interval will be written out next time a flusher thread wakes up
+# (Default is 3000).
+#vm.dirty_expire_centisecs = 3000
+
+# The kernel flusher threads will periodically wake up and write old data out to disk.  This
+# tunable expresses the interval between those wakeups, in 100'ths of a second (Default is 500).
+vm.dirty_writeback_centisecs = 1500
+
+# Enable the sysctl setting kernel.unprivileged_userns_clone to allow normal users to run unprivileged containers.
+kernel.unprivileged_userns_clone=1
+
+# To hide any kernel messages from the console
+kernel.printk = 3 3 3 3
+
+# Restricting access to kernel logs
+kernel.dmesg_restrict = 1
+
+# Restricting access to kernel pointers in the proc filesystem
+kernel.kptr_restrict = 2
+
+# Disable Kexec, which allows replacing the current running kernel. 
+kernel.kexec_load_disabled = 1
+
+# Increasing the size of the receive queue.
+# The received frames will be stored in this queue after taking them from the ring buffer on the network card.
+# Increasing this value for high speed cards may help prevent losing packets: 
+net.core.netdev_max_backlog = 16384
+
+# Increase the maximum connections
+#The upper limit on how many connections the kernel will accept (default 128): 
+net.core.somaxconn = 8192
+
+# Increase the memory dedicated to the network interfaces
+# The default the Linux network stack is not configured for high speed large file transfer across WAN links (i.e. handle more network packets) and setting the correct values may save memory resources: 
+net.core.rmem_default = 1048576
+net.core.rmem_max = 16777216
+net.core.wmem_default = 1048576
+net.core.wmem_max = 16777216
+net.core.optmem_max = 65536
+net.ipv4.tcp_rmem = 4096 1048576 2097152
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.udp_rmem_min = 8192
+net.ipv4.udp_wmem_min = 8192
+
+# Enable TCP Fast Open
+# TCP Fast Open is an extension to the transmission control protocol (TCP) that helps reduce network latency
+# by enabling data to be exchanged during the sender’s initial TCP SYN [3]. 
+# Using the value 3 instead of the default 1 allows TCP Fast Open for both incoming and outgoing connections: 
+net.ipv4.tcp_fastopen = 3
+
+# Enable BBR
+# The BBR congestion control algorithm can help achieve higher bandwidths and lower latencies for internet traffic
+net.core.default_qdisc = cake
+net.ipv4.tcp_congestion_control = bbr
+
+# TCP SYN cookie protection
+# Helps protect against SYN flood attacks. Only kicks in when net.ipv4.tcp_max_syn_backlog is reached: 
+net.ipv4.tcp_syncookies = 1
+
+# Protect against tcp time-wait assassination hazards, drop RST packets for sockets in the time-wait state. Not widely supported outside of Linux, but conforms to RFC: 
+net.ipv4.tcp_rfc1337 = 1
+
+# By enabling reverse path filtering, the kernel will do source validation of the packets received from all the interfaces on the machine. This can protect from attackers that are using IP spoofing methods to do harm. 
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.rp_filter = 1
+
+# Disable ICMP redirects
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# To use the new FQ-PIE Queue Discipline (>= Linux 5.6) in systems with systemd (>= 217), will need to replace the default fq_codel. 
+net.core.default_qdisc = fq_pie
+EOF
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Nftables Firewall"
+echo ""
+
+cat << EOF > /mnt/etc/nftables.conf
+flush ruleset
+
+table ip filter {
+  chain DOCKER-USER {
+    mark set 1
+  }
+}
+
+table inet my_table {
+	chain my_input {
+		type filter hook input priority 0; policy drop;
+
+		iif lo accept comment "Accept any localhost traffic"
+		ct state invalid drop comment "Drop invalid connections"
+		
+		meta l4proto icmp icmp type echo-request limit rate over 10/second burst 4 packets drop comment "No ping floods"
+		meta l4proto ipv6-icmp icmpv6 type echo-request limit rate over 10/second burst 4 packets drop comment "No ping floods"
+
+		ct state established,related accept comment "Accept traffic originated from us"
+
+		meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, ind-neighbor-solicit, ind-neighbor-advert, mld2-listener-report } accept comment "Accept ICMPv6"
+		meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, ind-neighbor-solicit, ind-neighbor-advert, mld2-listener-report } accept comment "Accept ICMPv6"
+		meta l4proto icmp icmp type { destination-unreachable, router-solicitation, router-advertisement, time-exceeded, parameter-problem } accept comment "Accept ICMP"
+		ip protocol igmp accept comment "Accept IGMP"
+
+		tcp dport ssh ct state new limit rate 15/minute accept comment "Avoid brute force on SSH"
+
+		udp dport mdns ip6 daddr ff02::fb accept comment "Accept mDNS"
+		udp dport mdns ip daddr 224.0.0.251 accept comment "Accept mDNS"
+
+		udp sport 1900 udp dport >= 1024 ip6 saddr { fd00::/8, fe80::/10 } meta pkttype unicast limit rate 4/second burst 20 packets accept comment "Accept UPnP IGD port mapping reply"
+		udp sport 1900 udp dport >= 1024 ip saddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } meta pkttype unicast limit rate 4/second burst 20 packets accept comment "Accept UPnP IGD port mapping reply"
+
+		udp sport netbios-ns udp dport >= 1024 meta pkttype unicast ip6 saddr { fd00::/8, fe80::/10 } accept comment "Accept Samba Workgroup browsing replies"
+		udp sport netbios-ns udp dport >= 1024 meta pkttype unicast ip saddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept comment "Accept Samba Workgroup browsing replies"
+
+		counter comment "Count any other traffic"
+	}
+
+	chain my_forward {
+		type filter hook forward priority security; policy drop;
+  		mark 1 accept
+		# Drop everything forwarded to that's not from docker us. We do not forward. That is routers job.
+	}
+
+	chain my_output {
+		type filter hook output priority 0; policy accept;
+		# Accept every outbound connection
+	}
+
+}
+
+table inet dev {
+    set blackhole {
+        type ipv4_addr;
+        flags dynamic, timeout;
+        size 65536;
+    }
+
+    chain input {
+        ct state new tcp dport 443 \
+                meter flood size 128000 { ip saddr timeout 10s limit rate over 10/second } \
+                add @blackhole { ip saddr timeout 1m }
+
+        ip saddr @blackhole counter drop
+    }
+}
+EOF
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "SSHGuard"
+echo ""
+
+cat << EOF > /mnt/etc/sshguard.conf
+# Full path to backend executable (required, no default)
+BACKEND="/usr/lib/sshguard/sshg-fw-nft-sets"
+
+# Log reader command (optional, no default)
+LOGREADER="LANG=C /usr/bin/journalctl -afb -p info -n1 -t sshd -t vsftpd -o cat"
+
+# How many problematic attempts trigger a block
+THRESHOLD=20
+# Blocks last at least 180 seconds
+BLOCK_TIME=180
+# The attackers are remembered for up to 3600 seconds
+DETECTION_TIME=3600
+
+# Blacklist threshold and file name
+BLACKLIST_FILE=100:/var/db/sshguard/blacklist.db
+
+# IPv6 subnet size to block. Defaults to a single address, CIDR notation. (optional, default to 128)
+IPV6_SUBNET=64
+# IPv4 subnet size to block. Defaults to a single address, CIDR notation. (optional, default to 32)
+IPV4_SUBNET=24
+EOF
+
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Automatic logout"
+echo ""
+
+cat << EOF > /mnt/etc/profile.d/shell-timeout.sh
+TMOUT="\$(( 60*30 ))";
+[ -z "\$DISPLAY" ] && export TMOUT;
+case \$( /usr/bin/tty ) in
+	/dev/tty[0-9]*) export TMOUT;;
+esac
+EOF
+
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Prepare gnome-keyring-daemon"
+echo ""
+
+cat <<EOF > /mnt/etc/pam.d/login
+#%PAM-1.0
+ 
+auth       required     pam_securetty.so
+auth       requisite    pam_nologin.so
+auth       include      system-local-login
+auth       optional     pam_gnome_keyring.so
+account    include      system-local-login
+session    include      system-local-login
+session    optional     pam_gnome_keyring.so auto_start
+EOF
+
+sleep 1
+clear
+
+cat <<EOF > /mnt/etc/pam.d/passwd
+#%PAM-1.0
+
+#password	required	pam_cracklib.so difok=2 minlen=8 dcredit=2 ocredit=2 retry=3
+#password	required	pam_unix.so sha512 shadow use_authtok
+password	required	pam_unix.so sha512 shadow nullok
+password	optional	pam_gnome_keyring.so
+EOF
+
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Establecer ZDOTDIR"
+echo ""
+
+cat << EOF > /mnt/etc/zsh/zshenv
+export ZDOTDIR=$HOME/.config/zsh
+export HISTFILE="$XDG_DATA_HOME"/zsh/history
+EOF
+
+
+sleep 1
+clear
+
+
+
+echo ""
+echo "Setup PostgreSQL"
+echo ""
+
+arch-chroot /mnt /bin/bash -c "su -l postgres && initdb --locale=en_US.UTF-8 -E UTF8 -D /var/lib/postgres/data && exit"
+
+cat << EOF > /mnt/var/lib/postgres/data/postgresql.conf
+stats_temp_directory = '/run/postgresql'
+EOF
+
+
+sleep 1
+clear
+
+
+
+#############################################
+###########################################
+############################################
+
+
+# Make scripts to start service & setup snapshots
+
+cat << EOF >> /mnt/home/$USER/init.sh
+sudo umount /.snapshots
+sudo rm -r /.snapshots
+sudo snapper -c root create-config /
+sudo mount -a
+sudo chmod 750 -R /.snapshots
+sudo chmod a+rx /.snapshots
+sudo chown :wheel /.snapshots
+sudo snapper -c root create --description "Fresh Install"
+sudo sed -i 's/^TIMELINE_MIN_AGE.*/TIMELINE_MIN_AGE="1800"/' /etc/snapper/configs/root
+sudo sed -i 's/^TIMELINE_LIMIT_HOURLY.*/TIMELINE_LIMIT_HOURLY="0"/' /etc/snapper/configs/root
+sudo sed -i 's/^TIMELINE_LIMIT_DAILY.*/TIMELINE_LIMIT_DAILY="7"/' /etc/snapper/configs/root
+sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY.*/TIMELINE_LIMIT_WEEKLY="0"/' /etc/snapper/configs/root
+sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY.*/TIMELINE_LIMIT_MONTHLY="0"/' /etc/snapper/configs/root
+sudo sed -i 's/^TIMELINE_LIMIT_YEARLY.*/TIMELINE_LIMIT_YEARLY="0"/' /etc/snapper/configs/root
+sudo systemctl enable --now snapper-timeline.timer snapper-cleanup.timer
+sudo systemctl disable --now systemd-timesyncd.service
+sudo systemctl mask systemd-rfkill.socket systemd-rfkill.service
+sudo systemctl enable --now NetworkManager 
+sudo systemctl enable --now NetworkManager-wait-online
+sudo systemctl enable --now NetworkManager-dispatcher
+sudo systemctl enable --now nftables
+sudo systemctl enable --now opennic-up.timer
+sudo systemctl enable --now sshd 
+sudo systemctl enable --now chronyd
+sudo systemctl enable --now reflector
+sudo systemctl enable --now apparmor 
+sudo systemctl enable --now sshguard
+# sudo systemctl enable --now tlp 
+sudo systemctl enable --now memavaild 
+sudo systemctl enable --now haveged 
+sudo systemctl enable --now irqbalance 
+sudo systemctl enable --now prelockd 
+sudo systemctl enable --now systemd-swap 
+sudo systemctl enable --now nohang-desktop 
+sudo systemctl enable --now auto-cpufreq 
+sudo systemctl enable --now dbus-broker
+sudo systemctl enable --now postgresql
+sudo systemctl enable --now refind-btrfs
+systemctl --user start psd
+rm /home/$USER/init.sh
+EOF
+
+chown $USER /mnt/home/$USER/init.sh
+
+### Step 10 - Reboot into your new install
+
+#DESMONTAR Y REINICIAR
+umount -R /mnt
+      clear 
+      echo "Arch Linux Instalado"               
+      sleep 3
+reboot
+
+
+
